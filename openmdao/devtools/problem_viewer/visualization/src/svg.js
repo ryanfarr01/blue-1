@@ -55,6 +55,10 @@ function UpdateSvgCss(svgStyleElement, FONT_SIZE_PX){
         "    fill: " + PARAM_COLOR + "; " +
         "    fill-opacity: .8; " +
         "} " +
+        "g.unconnected_param > rect { " +
+        "    fill: " + UNCONNECTED_PARAM_COLOR + "; " +
+        "    fill-opacity: .8; " +
+        "} " +
         "g.subsystem > rect { " +
         "    cursor: pointer; " +
         "    fill-opacity: .8; " +

@@ -131,10 +131,8 @@ function DrawArrows(startIndex, endIndex) {
             var y3 = endIndex * n2Dy; //down y3
 
             DrawPathTwoLines(x1, y1, x2, y2, x3, y3, GREEN_ARROW_COLOR, lineWidth, true);
-
         }
         else if (startIndex > endIndex) { //left up arrow
-            //alert("yes");
             var x1 = startI * n2Dx; //x1
             var x2 = (endIndex + boxEndDelta * .5) * n2Dx + n2Dx * .5; //left x2
             var x3 = x2; //up x3
@@ -165,7 +163,6 @@ function DrawArrowsParamView(startIndex, endIndex) {
                 endIndices.push(endsI);
             }
         }
-
     }
 
     for (var i = 0; i < startIndices.length; ++i) {
@@ -182,7 +179,6 @@ function DrawArrowsParamView(startIndex, endIndex) {
             var y3 = endI * n2Dy; //down y3
 
             DrawPathTwoLines(x1, y1, x2, y2, x3, y3, GREEN_ARROW_COLOR, lineWidth, true);
-
         }
         else if (startIndex > endIndex) { //left up arrow
             //alert("yes");
@@ -209,6 +205,7 @@ function DrawMatrix() {
         var rt = d3RightTextNodesArrayZoomed[d.c];
         if (rt.isMinimized) return COLLAPSED_COLOR;
         if (rt.type === "param") return PARAM_COLOR;
+        if (rt.type === "unconnected_param") return UNCONNECTED_PARAM_COLOR
         return (rt.implicit) ? UNKNOWN_IMPLICIT_COLOR : UNKNOWN_EXPLICIT_COLOR;
     }
 
@@ -291,7 +288,6 @@ function DrawMatrix() {
         gUpdate.select("line")
             .attr("x2", WIDTH_N2_PX);
 
-
         var nodeExit = sel.exit().transition(sharedTransition)
             .attr("transform", function (d) {
                 if (lastClickWasLeft) return "translate(0," + (n2Dy * (d.i - exitIndex)) + ")";
@@ -330,7 +326,6 @@ function DrawMatrix() {
             });
         gUpdate.select("line")
             .attr("x1", -HEIGHT_PX);
-
 
         var nodeExit = sel.exit().transition(sharedTransition)
             .attr("transform", function (d) {

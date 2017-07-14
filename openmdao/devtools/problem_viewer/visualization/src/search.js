@@ -8,7 +8,7 @@ var callSearchFromEnterKeyPressed = false;
 var autoCompleteListNames = [], autoCompleteListPathNames = [];
 var searchCollapsedUndo = [];        
 var autoCompleteSetNames = {}, autoCompleteSetPathNames = {};
-var showParams = false; //default off
+var showParams = true; //default off
 
 window.addEventListener("awesomplete-selectcomplete", function (e) {
     // User made a selection from dropdown.

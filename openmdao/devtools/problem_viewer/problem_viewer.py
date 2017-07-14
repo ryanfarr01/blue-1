@@ -159,8 +159,7 @@ def view_tree(*args, **kwargs):
 
 def view_model(problem_or_filename, outfile_name='visualization', show_browser=True):
     """
-    Generates a self-contained html file containing a tree viewer
-    of the specified type.  Optionally pops up a web browser to
+    Generates a directory containing a tree viewer Optionally pops up a web browser to
     view the file.
 
     Parameters
@@ -175,17 +174,6 @@ def view_model(problem_or_filename, outfile_name='visualization', show_browser=T
     show_browser : bool, optional
         If True, pop up the system default web browser to view the generated html file.
         Defaults to True.
-
-    offline : bool, optional
-        If True, embed the javascript d3 library into the generated html file so that the tree can be viewed
-        offline without an internet connection.  Otherwise if False, have the html request the latest d3 file
-        from https://d3js.org/d3.v4.min.js when opening the html file.
-        Defaults to True.
-
-    embed : bool, optional
-        If True, export only the innerHTML that is between the body tags, used for embedding the viewer into another html file.
-        If False, create a standalone HTML file that has the DOCTYPE, html, head, meta, and body tags.
-        Defaults to False.
     """
     model_data_filename = 'model_data.js'
     folder_name = outfile_name

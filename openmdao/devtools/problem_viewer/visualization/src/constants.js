@@ -5,6 +5,7 @@ var CONNECTION_COLOR = "black",
     RED_ARROW_COLOR = "salmon",
     GREEN_ARROW_COLOR = "seagreen",
     PARAM_COLOR = "Plum",
+    UNCONNECTED_PARAM_COLOR = "#F42E0C",
     GROUP_COLOR = "steelblue",
     COMPONENT_COLOR = "DeepSkyBlue",
     COLLAPSED_COLOR = "#555";

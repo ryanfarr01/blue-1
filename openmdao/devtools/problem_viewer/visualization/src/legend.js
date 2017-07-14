@@ -79,6 +79,8 @@ function SetupLegend(d3, d3ContentDiv) {
         if (showParams) {
             text.splice(2, 0, "Param");
             colors.splice(2, 0, PARAM_COLOR);
+            text.splice(3, 0, "Unconnected Param")
+            colors.splice(3, 0, UNCONNECTED_PARAM_COLOR)
         }
         for (var i = 0; i < text.length; ++i) {
             var el = svg_legend.append("g").attr("transform", "translate(" + (columnWidth * 0 + xOffset + u) + "," + (80 + 40 * i + v) + ")");
