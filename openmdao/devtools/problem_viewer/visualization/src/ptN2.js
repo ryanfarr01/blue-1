@@ -56,7 +56,7 @@ function PtN2Diagram(paramParentDiv, paramRootJson, paramConnsJson) {
         while (stack.length > 0) {
             var cur_ele = stack.pop();
             if (cur_ele.type === "param") {
-                if (!hasInputConnection(cur_ele.absPathName)) {
+                if (!hasInputConnection(cur_ele.absPathName) && !hasOutputConnection(cur_ele.absPathName)) {
                     cur_ele.type = "unconnected_param";
                 }
             }
@@ -77,6 +77,13 @@ function PtN2Diagram(paramParentDiv, paramRootJson, paramConnsJson) {
         }
 
         return false;
+    }
+    function hasOutputConnection(target) {
+        for (i = 0; i < conns.length; ++i) {
+            if (conns[i].src === target) {
+                return true;
+            }
+        }
     }
     hasInputConn = hasInputConnection;
 
@@ -1659,7 +1666,7 @@ function PtN2Diagram(paramParentDiv, paramRootJson, paramConnsJson) {
     };
 }
 
-var zoomedElement;
+var zoomedElement = modelData['tree'];
 var updateFunc;
 var mouseOverOffDiagN2;
 var mouseOverOnDiagN2;

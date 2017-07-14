@@ -191,7 +191,7 @@ def view_model(problem_or_filename, outfile_name='visualization', show_browser=T
     if not os.path.exists(directory):
         os.stat(directory)
 
-    shutil.copytree(src=code_dir + '/' + folder_name, dst='visualization')
+    shutil.copytree(src=code_dir + '/visualization', dst=folder_name)
 
     with open(cur_dir + '/' + folder_name + '/' + model_data_filename, 'w') as f:
         f.write('var modelData = %s' % model_data)
