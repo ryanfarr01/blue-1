@@ -78,6 +78,7 @@ function PtN2Diagram(paramParentDiv, paramRootJson, paramConnsJson) {
 
         return false;
     }
+    
     function hasOutputConnection(target) {
         for (i = 0; i < conns.length; ++i) {
             if (conns[i].src === target) {
