@@ -1,11 +1,10 @@
 """Define the base System class."""
 from __future__ import division
 
+import sys
 from contextlib import contextmanager
 from collections import OrderedDict, Iterable
 from fnmatch import fnmatchcase
-import sys
-import inspect
 from itertools import product
 
 from six import iteritems, string_types
@@ -19,12 +18,10 @@ from openmdao.proc_allocators.default_allocator import DefaultAllocator
 
 from openmdao.utils.general_utils import \
     determine_adder_scaler, format_as_float_or_array, warn_deprecation
-from openmdao.recorders.recording_manager import RecordingManager
 from openmdao.utils.mpi import MPI
 from openmdao.utils.options_dictionary import OptionsDictionary
 from openmdao.utils.units import convert_units
 from openmdao.utils.array_utils import convert_neg
-from openmdao.utils.record_util import create_local_meta
 
 
 class System(object):
@@ -52,9 +49,6 @@ class System(object):
         MPI communicator object.
     metadata : <OptionsDictionary>
         Dictionary of user-defined arguments.
-    iter_count : int
-        Int that holds the number of times this system has iterated
-        in a recording run.
     #
     _mpi_proc_allocator : <ProcAllocator>
         Object that distributes procs among subsystems.
@@ -118,8 +112,6 @@ class System(object):
     _conn_global_abs_in2out : {'abs_in': 'abs_out'}
         Dictionary containing all explicit & implicit connections owned by this system
         or any descendant system. The data is the same across all processors.
-    _conn_parents_abs_in2out : {'abs_in': 'abs_out'}
-        Dictionary containing all explicit & implicit connections from systems above.
     _conn_abs_in2out : {'abs_in': 'abs_out'}
         Dictionary containing all explicit & implicit connections owned
         by this system only. The data is the same across all processors.
@@ -159,7 +151,7 @@ class System(object):
         Vector of upper bounds, scaled and dimensionless.
     #
     _scaling_vecs : dict of dict of Vectors
-        First key indicates vector type and coefficient, second key is vec_name.
+        First key is indicates vector type and coefficient, second key is vec_name.
     #
     _nonlinear_solver : <NonlinearSolver>
         Nonlinear solver to be used for solve_nonlinear.
@@ -190,8 +182,6 @@ class System(object):
         dict of all driver design vars added to the system.
     _responses : dict of dict
         dict of all driver responses added to the system.
-    _rec_mgr : <RecordingManager>
-        object that manages all recorders added to this system.
     #
     _static_mode : bool
         If true, we are outside of setup.
@@ -225,8 +215,6 @@ class System(object):
         self.comm = None
         self.metadata = OptionsDictionary()
 
-        self.iter_count = 0
-
         self._mpi_proc_allocator = DefaultAllocator()
 
         self._subsystems_allprocs = []
@@ -238,7 +226,7 @@ class System(object):
 
         self._num_var = {'input': 0, 'output': 0}
         self._num_var_byset = {'input': {}, 'output': {}}
-        self._var_set2iset = {'input': {}, 'output': {}}
+        self._var_set2iset = OrderedDict([('input', {}), ('output', {})])
 
         self._var_promotes = {'input': [], 'output': [], 'any': []}
         self._var_allprocs_abs_names = {'input': [], 'output': []}
@@ -256,7 +244,6 @@ class System(object):
 
         self._manual_connections = {}
         self._conn_global_abs_in2out = {}
-        self._conn_parents_abs_in2out = {}
         self._conn_abs_in2out = {}
 
         self._ext_num_vars = {'input': (0, 0), 'output': (0, 0)}
@@ -264,7 +251,6 @@ class System(object):
         self._ext_sizes = {'input': (0, 0), 'output': (0, 0)}
         self._ext_sizes_byset = {'input': {}, 'output': {}}
 
-        self._vec_names = ['nonlinear', 'linear']
         self._vectors = {'input': {}, 'output': {}, 'residual': {}}
         self._excluded_vars_out = set()
         self._excluded_vars_in = set()
@@ -303,7 +289,6 @@ class System(object):
 
         self._design_vars = {}
         self._responses = {}
-        self._rec_mgr = RecordingManager()
 
         self._static_mode = True
         self._static_subsystems_allprocs = []
@@ -459,11 +444,11 @@ class System(object):
             ext_sizes = {'input': (0, 0), 'output': (0, 0)}
             ext_num_vars_byset = {
                 'input': {set_name: (0, 0) for set_name in self._var_set2iset['input']},
-                'output': {set_name: (0, 0) for set_name in self._var_set2iset['output']},
+                'output': {set_name: (0, 0) for set_name in self._var_set2iset['output']}
             }
             ext_sizes_byset = {
                 'input': {set_name: (0, 0) for set_name in self._var_set2iset['input']},
-                'output': {set_name: (0, 0) for set_name in self._var_set2iset['output']},
+                'output': {set_name: (0, 0) for set_name in self._var_set2iset['output']}
             }
             return ext_num_vars, ext_num_vars_byset, ext_sizes, ext_sizes_byset
 
@@ -491,15 +476,22 @@ class System(object):
         dict of set
             Dictionary of sets of excluded input variable absolute names, keyed by vec_name.
         """
-        root_vectors = {'input': {}, 'output': {}, 'residual': {}}
+        root_vectors = {'input': OrderedDict(),
+                        'output': OrderedDict(),
+                        'residual': OrderedDict()}
+
+        # get all vec_names.  We don't know mode here, so for now, retrieve names
+        # from both dvs and responses and use both.
+        # TODO: fix this
+        in_vec_names = _get_vec_names(self.get_design_vars(recurse=True))
+        out_vec_names = _get_vec_names(self.get_responses(recurse=True))
+        vec_names = ['nonlinear', 'linear']
+        vec_names.extend(sorted(in_vec_names | out_vec_names))
 
         for key in ['input', 'output', 'residual']:
             type_ = 'output' if key is 'residual' else key
-            for vec_name in self._vec_names:
-                if not initial:
-                    root_vectors[key][vec_name] = self._vectors[key][vec_name]._root_vector
-                else:
-
+            for vec_name in vec_names:
+                if initial:
                     # Check for complex step to set vectors up appropriately.
                     # If any subsystem needs complex step, then we need to allocate it everywhere.
                     alloc_complex = force_alloc_complex
@@ -512,13 +504,15 @@ class System(object):
 
                     root_vectors[key][vec_name] = vector_class(vec_name, type_, self,
                                                                alloc_complex=alloc_complex)
+                else:
+                    root_vectors[key][vec_name] = self._vectors[key][vec_name]._root_vector
 
-        if not initial:
+        if initial:
+            excl_out = {vec_name: set() for vec_name in root_vectors['output']}
+            excl_in = {vec_name: set() for vec_name in root_vectors['output']}
+        else:
             excl_out = self._excluded_vars_out
             excl_in = self._excluded_vars_in
-        else:
-            excl_out = {vec_name: set() for vec_name in self._vec_names}
-            excl_in = {vec_name: set() for vec_name in self._vec_names}
 
         return root_vectors, excl_out, excl_in
 
@@ -565,20 +559,20 @@ class System(object):
         dict of dict of Vector
             Root vectors: first key is 'input', 'output', or 'residual'; second key is vec_name.
         """
-        root_vectors = {
-            ('input', 'phys0'): {}, ('input', 'phys1'): {},
-            ('input', 'norm0'): {}, ('input', 'norm1'): {},
-            ('output', 'phys0'): {}, ('output', 'phys1'): {},
-            ('output', 'norm0'): {}, ('output', 'norm1'): {},
-            ('residual', 'phys0'): {}, ('residual', 'phys1'): {},
-            ('residual', 'norm0'): {}, ('residual', 'norm1'): {},
-        }
+        root_vectors = OrderedDict([
+            (('input', 'phys0'), OrderedDict()), (('input', 'phys1'), OrderedDict()),
+            (('input', 'norm0'), OrderedDict()), (('input', 'norm1'), OrderedDict()),
+            (('output', 'phys0'), OrderedDict()), (('output', 'phys1'), OrderedDict()),
+            (('output', 'norm0'), OrderedDict()), (('output', 'norm1'), OrderedDict()),
+            (('residual', 'phys0'), OrderedDict()), (('residual', 'phys1'), OrderedDict()),
+            (('residual', 'norm0'), OrderedDict()), (('residual', 'norm1'), OrderedDict()),
+        ])
 
         for key in root_vectors:
             vec_key, coeff_key = key
             type_ = 'output' if vec_key == 'residual' else vec_key
 
-            for vec_name in self._vec_names:
+            for vec_name in self._vectors['output']:
                 if not initial:
                     root_vectors[key][vec_name] = self._scaling_vecs[key][vec_name]._root_vector
                 else:
@@ -674,10 +668,6 @@ class System(object):
         # If full or reconf setup, reset this system's variables to initial values.
         if setup_mode in ('full', 'reconf'):
             self.set_initial_values()
-
-        self._rec_mgr.startup(self)
-        for sub in self.system_iter(recurse=True, include_self=True):
-            sub._rec_mgr.record_metadata(sub)
 
     def _setup_procs(self, pathname, comm):
         """
@@ -826,7 +816,7 @@ class System(object):
                 global_shape = (global_size,)
             mymeta['global_shape'] = global_shape
 
-    def _setup_global_connections(self, recurse=True):
+    def _setup_global_connections(self, recurse=True, conns=None):
         """
         Compute dict of all connections between this system's inputs and outputs.
 
@@ -840,6 +830,8 @@ class System(object):
         ----------
         recurse : bool
             Whether to call this method in subsystems.
+        conns : dict
+            Dictionary of connections passed down from parent group.
         """
         self._conn_global_abs_in2out = {}
 
@@ -891,7 +883,9 @@ class System(object):
         alloc_complex : bool
             Whether to allocate any imaginary storage to perform complex step. Default is False.
         """
-        self._vectors = vectors = {'input': {}, 'output': {}, 'residual': {}}
+        self._vectors = vectors = {'input': OrderedDict(),
+                                   'output': OrderedDict(),
+                                   'residual': OrderedDict()}
         self._excluded_vars_out = excl_out
         self._excluded_vars_in = excl_in
 
@@ -905,7 +899,7 @@ class System(object):
                 '"force_alloc_complex" to True during setup.'
             raise RuntimeError(msg)
 
-        for vec_name in self._vec_names:
+        for vec_name in root_vectors['output']:
             vector_class = root_vectors['output'][vec_name].__class__
 
             for key in ['input', 'output', 'residual']:
@@ -977,19 +971,19 @@ class System(object):
         resize : bool
             Whether to resize the root vectors - i.e, because this system is initiating a reconf.
         """
-        self._scaling_vecs = vecs = {
-            ('input', 'phys0'): {}, ('input', 'phys1'): {},
-            ('input', 'norm0'): {}, ('input', 'norm1'): {},
-            ('output', 'phys0'): {}, ('output', 'phys1'): {},
-            ('output', 'norm0'): {}, ('output', 'norm1'): {},
-            ('residual', 'phys0'): {}, ('residual', 'phys1'): {},
-            ('residual', 'norm0'): {}, ('residual', 'norm1'): {},
-        }
+        self._scaling_vecs = vecs = OrderedDict([
+            (('input', 'phys0'), OrderedDict()), (('input', 'phys1'), OrderedDict()),
+            (('input', 'norm0'), OrderedDict()), (('input', 'norm1'), OrderedDict()),
+            (('output', 'phys0'), OrderedDict()), (('output', 'phys1'), OrderedDict()),
+            (('output', 'norm0'), OrderedDict()), (('output', 'norm1'), OrderedDict()),
+            (('residual', 'phys0'), OrderedDict()), (('residual', 'phys1'), OrderedDict()),
+            (('residual', 'norm0'), OrderedDict()), (('residual', 'norm1'), OrderedDict()),
+        ])
 
         allprocs_abs2meta_out = self._var_allprocs_abs2meta['output']
         abs2meta_in = self._var_abs2meta['input']
 
-        for vec_name in self._vec_names:
+        for vec_name in self._vectors['output']:
             vector_class = root_vectors['residual', 'phys0'][vec_name].__class__
 
             for key in vecs:
@@ -1755,7 +1749,8 @@ class System(object):
                     yield sub
 
     def add_design_var(self, name, lower=None, upper=None, ref=None,
-                       ref0=None, indices=None, adder=None, scaler=None):
+                       ref0=None, indices=None, adder=None, scaler=None,
+                       rhs_group=None):
         r"""
         Add a design variable to this system.
 
@@ -1781,6 +1776,9 @@ class System(object):
         scaler : float or ndarray, optional
             value to multiply the model value to get the scaled value. Scaler
             is second in precedence.
+        rhs_group : string
+            If specified, this design var will be grouped for parallel derivative
+            calculations with other variables sharing the same rhs_group.
 
         Notes
         -----
@@ -1845,10 +1843,11 @@ class System(object):
             dvs['size'] = len(indices)
             indices = np.atleast_1d(indices)
         dvs['indices'] = indices
+        dvs['rhs_group'] = rhs_group
 
     def add_response(self, name, type_, lower=None, upper=None, equals=None,
                      ref=None, ref0=None, indices=None, index=None,
-                     adder=None, scaler=None, linear=False):
+                     adder=None, scaler=None, linear=False, rhs_group=None):
         r"""
         Add a response variable to this system.
 
@@ -1882,6 +1881,9 @@ class System(object):
             is second in precedence.
         linear : bool
             Set to True if constraint is linear. Default is False.
+        rhs_group : string
+            If specified, this design var will be grouped for parallel derivative
+            calculations with other variables sharing the same rhs_group.
 
         Notes
         -----
@@ -1991,16 +1993,16 @@ class System(object):
                 resp['size'] = len(indices)
                 indices = np.atleast_1d(indices)
             resp['indices'] = indices
-
         else:  # 'obj'
             if index is not None:
                 resp['size'] = 1
                 index = np.array([index], dtype=int)
             resp['indices'] = index
+        resp['rhs_group'] = rhs_group
 
     def add_constraint(self, name, lower=None, upper=None, equals=None,
                        ref=None, ref0=None, adder=None, scaler=None,
-                       indices=None, linear=False):
+                       indices=None, linear=False, rhs_group=None):
         r"""
         Add a constraint variable to this system.
 
@@ -2030,6 +2032,9 @@ class System(object):
             negative integers.
         linear : bool
             Set to True if constraint is linear. Default is False.
+        rhs_group : string
+            If specified, this design var will be grouped for parallel derivative
+            calculations with other variables sharing the same rhs_group.
 
         Notes
         -----
@@ -2039,10 +2044,11 @@ class System(object):
         """
         self.add_response(name=name, type_='con', lower=lower, upper=upper,
                           equals=equals, scaler=scaler, adder=adder, ref=ref,
-                          ref0=ref0, indices=indices, linear=linear)
+                          ref0=ref0, indices=indices, linear=linear,
+                          rhs_group=rhs_group)
 
     def add_objective(self, name, ref=None, ref0=None, index=None,
-                      adder=None, scaler=None):
+                      adder=None, scaler=None, rhs_group=None):
         r"""
         Add a response variable to this system.
 
@@ -2064,6 +2070,9 @@ class System(object):
         scaler : float or ndarray, optional
             value to multiply the model value to get the scaled value. Scaler
             is second in precedence.
+        rhs_group : string
+            If specified, this design var will be grouped for parallel derivative
+            calculations with other variables sharing the same rhs_group.
 
         Notes
         -----
@@ -2093,7 +2102,7 @@ class System(object):
         if index is not None and not isinstance(index, int):
             raise TypeError('If specified, index must be an int.')
         self.add_response(name, type_='obj', scaler=scaler, adder=adder,
-                          ref=ref, ref0=ref0, index=index)
+                          ref=ref, ref0=ref0, index=index, rhs_group=rhs_group)
 
     def get_design_vars(self, recurse=True):
         """
@@ -2125,24 +2134,18 @@ class System(object):
             raise RuntimeError(msg.format(str(err), self.pathname))
 
         # Size them all
-        vec = self._outputs._views_flat
+        iproc = self.comm.rank
         for name, data in iteritems(out):
             if 'size' not in data:
-                # Depending on where the designvar was added, the name in the
-                # vectors might be relative instead of absolute. Lucky we have
-                # both.
-                if name in vec:
-                    data['size'] = vec[name].size
-                else:
-                    data['size'] = vec[out[name]['name']].size
+                data['size'] = \
+                    self._var_sizes['output'][iproc,
+                                              self._var_allprocs_abs2idx['output'][name]]
 
         if recurse:
             for subsys in self._subsystems_myproc:
-                subsys_design_vars = subsys.get_design_vars(recurse=recurse)
-                for key in subsys_design_vars:
-                    out[key] = subsys_design_vars[key]
+                out.update(subsys.get_design_vars(recurse=recurse))
+
             if self.comm.size > 1 and self._subsystems_allprocs:
-                iproc = self.comm.rank
                 for rank, all_out in enumerate(self.comm.allgather(out)):
                     if rank != iproc:
                         out.update(all_out)
@@ -2179,19 +2182,18 @@ class System(object):
             raise RuntimeError(msg.format(str(err), self.pathname))
 
         # Size them all
-        vec = self._outputs._views_flat
+        iproc = self.comm.rank
         for name in out:
             if 'size' not in out[name]:
-                out[name]['size'] = vec[name].size
+                out[name]['size'] = \
+                    self._var_sizes['output'][iproc,
+                                              self._var_allprocs_abs2idx['output'][name]]
 
         if recurse:
             for subsys in self._subsystems_myproc:
-                subsys_responses = subsys.get_responses(recurse=recurse)
-                for key in subsys_responses:
-                    out[key] = subsys_responses[key]
+                out.update(subsys.get_responses(recurse=recurse))
 
             if self.comm.size > 1 and self._subsystems_allprocs:
-                iproc = self.comm.rank
                 for rank, all_out in enumerate(self.comm.allgather(out)):
                     if rank != iproc:
                         out.update(all_out)
@@ -2603,6 +2605,15 @@ class System(object):
             list of names of the right-hand-side vectors.
         mode : str
             'fwd' or 'rev'.
+
+        Returns
+        -------
+        boolean
+            Failure flag; True if failed to converge, False is successful.
+        float
+            relative error.
+        float
+            absolute error.
         """
         pass
 
@@ -2616,43 +2627,6 @@ class System(object):
             Flag indicating if the nonlinear solver should be linearized.
         do_ln : boolean
             Flag indicating if the linear solver should be linearized.
-        """
-        pass
-
-    def initialize_processors(self):
-        """
-        Run after repartitioning/rebalancing. (Optional user-defined method).
-
-        Available attributes:
-            name
-            pathname
-            comm
-            metadata (local and global)
-        """
-        pass
-
-    def initialize_variables(self):
-        """
-        Declare inputs and outputs. (Required method for components).
-
-        Available attributes:
-            name
-            pathname
-            comm
-            metadata (local and global)
-        """
-        pass
-
-    def initialize_partials(self):
-        """
-        Declare Jacobian structure/approximations. (Optional method for components).
-
-        Available attributes:
-            name
-            pathname
-            comm
-            metadata (local and global)
-            variable names
         """
         pass
 
@@ -2671,23 +2645,7 @@ class System(object):
 
         return states
 
-    def add_recorder(self, recorder):
-        """
-        Add a recorder to the driver.
 
-        Parameters
-        ----------
-        recorder : <BaseRecorder>
-           A recorder instance.
-        """
-        self._rec_mgr.append(recorder)
-
-    def record_iteration(self):
-        """
-        Record an iteration of the current System.
-        """
-        metadata = create_local_meta(self.pathname)
-        # Send the calling method name into record_iteration, e.g. 'solve_nonlinear'.
-        self._rec_mgr.record_iteration(self, metadata, method=inspect.stack()[2][3])
-        # self._rec_mgr.record_iteration(self, metadata, method='_solve_nonlinear')
-        self.iter_count += 1
+def _get_vec_names(voi_dict):
+    return set(voi for voi, data in iteritems(voi_dict)
+               if data['rhs_group'] is not None)
