@@ -477,6 +477,68 @@ class TestServerRecorder(unittest.TestCase):
         for c in expected_constraints:
             self.assert_array_close(c, driver_iteration_data['constraints'])
 
+    def test_array_input(self, m):
+        self.setup_endpoints(m)
+        recorder = WebRecorder(self._accepted_token, suppress_output=True)
+
+        if OPT is None:
+            raise unittest.SkipTest("pyoptsparse is not installed")
+
+        if OPTIMIZER is None:
+            raise unittest.SkipTest("pyoptsparse is not providing SNOPT or SLSQP")
+
+        prob = Problem(model=Group())
+        prob.model.add_subsystem('indep', IndepVarComp('x', np.arange(12).reshape((4,3))))
+        prob.model.add_subsystem('C1', ExecComp('y=numpy.sum(x)*2.0', x=np.zeros((2,2))))
+
+        # connect C1.x to entries (0,0), (-1,1), (2,1), (1,1) of indep.x
+        prob.model.connect('indep.x', 'C1.x',
+                           src_indices=[[(0,0), (-1,1)],
+                                        [(2,1), (1,1)]])
+
+        prob.driver.add_recorder(recorder)
+        recorder.options['record_desvars'] = True
+        recorder.options['record_responses'] = True
+        recorder.options['record_objectives'] = True
+        recorder.options['record_constraints'] = True
+        recorder.options['record_inputs'] = True
+
+        prob.setup(check=False)
+
+        t0, t1 = run_driver(prob)
+
+        prob.cleanup()
+
+        driver_iteration_data = json.loads(self.driver_iteration_data)
+
+        expected_desvars = [
+            {'name': 'p1.x', 'values': [7.1666666]},
+            {'name': 'p2.y', 'values': [-7.8333333]}
+        ]
+
+        expected_objectives = [
+            {'name': 'comp.f_xy', 'values': [-27.083333]}
+        ]
+
+        expected_constraints = [
+            {'name': 'con.c', 'values': [-15.0]}
+        ]
+
+        print("Desvars: " + str(driver_iteration_data['desvars']))
+        print(" ")
+        print("Objectives: " + str(driver_iteration_data['objectives']))
+        print(" ")
+        print("Constraints: " + str(driver_iteration_data['constraints']))
+
+        # for d in expected_desvars:
+        #     self.assert_array_close(d, driver_iteration_data['desvars'])
+
+        # for o in expected_objectives:
+        #     self.assert_array_close(o, driver_iteration_data['objectives'])
+
+        # for c in expected_constraints:
+        #     self.assert_array_close(c, driver_iteration_data['constraints'])
+
     def test_record_solver(self, m):
         self.setup_endpoints(m)
         recorder = WebRecorder(self._accepted_token, suppress_output=True)
